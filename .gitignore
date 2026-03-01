@@ -1,0 +1,13 @@
+# Ignore datasets
+model_training_new/datasets/
+
+# Ignore trained models
+model_training_new/models/
+
+# Ignore model weights
+*.pt
+*.pkl
+
+__pycache__/
+*.pyc
+.env
