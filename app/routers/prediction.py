@@ -22,23 +22,39 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Any, Dict
+from pathlib import Path
 
 from core.security import get_current_user
 
 router = APIRouter(prefix="/api/predict", tags=["Disease Prediction"])
 
+# ─── Base directory (backend/) ─────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# ─── Model directory inside project ───────────────────────────────────────
+MODELS_DIR = BASE_DIR / "model_training_new" / "models"
+
+# ─── Dermatology Paths ────────────────────────────────────────────────────
+DERM_MODEL_PATH       = MODELS_DIR / "dermnet_dinov2" / "derm_model.pt"
+DERM_CLASS_NAMES_PATH = MODELS_DIR / "dermnet_dinov2" / "derm_class_names.json"
+
+# ─── Orthopedics Paths ────────────────────────────────────────────────────
+ORTHO_MODEL_PATH  = MODELS_DIR / "mura_efficientnetv2" / "mura_best.pt"
+ORTHO_CONFIG_PATH = MODELS_DIR / "mura_efficientnetv2" / "config.json"
+
+
 # ─── Model directories ────────────────────────────────────────────────────────
 MODELS_DIR = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models"
 
 # ─── DermNet DINOv2 config ────────────────────────────────────────────────────
-DERM_MODEL_PATH       = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_model.pt"
-DERM_CLASS_NAMES_PATH = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_class_names.json"
+# DERM_MODEL_PATH       = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_model.pt"
+# DERM_CLASS_NAMES_PATH = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_class_names.json"
 DERM_IMG_SIZE         = 224
 DERM_BACKBONE_NAME    = "Jayanth2002/dinov2-base-finetuned-SkinDisease"
 
 # ─── MURA Orthopedics config ──────────────────────────────────────────────────
-ORTHO_MODEL_PATH      = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\mura_best.pt"
-ORTHO_CONFIG_PATH     = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\config.json"
+# ORTHO_MODEL_PATH      = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\mura_best.pt"
+# ORTHO_CONFIG_PATH     = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\config.json"
 ORTHO_IMG_SIZE        = 320
 ORTHO_BODY_PARTS      = ['XR_ELBOW', 'XR_FINGER', 'XR_FOREARM',
                           'XR_HAND', 'XR_HUMERUS', 'XR_SHOULDER', 'XR_WRIST']
