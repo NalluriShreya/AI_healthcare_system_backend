@@ -2,10 +2,10 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
 
-from core.database import connect_db, close_db, get_db
-from core.security import get_current_user
-from core.utils import serialize_doc
-from routers import auth, otp, patient, doctor, admin, prediction
+from app.core.database import connect_db, close_db, get_db
+from app.core.security import get_current_user
+from app.core.utils import serialize_doc
+from app.routers import auth, otp, patient, doctor, admin, prediction
 
 app = FastAPI(title="AI Healthcare System API")
 
