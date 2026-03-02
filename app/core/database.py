@@ -1,7 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import DESCENDING
 from typing import Optional
-from core.config import MONGODB_URL, DATABASE_NAME
+from app.core.config import MONGODB_URL, DATABASE_NAME
 
 client: Optional[AsyncIOMotorClient] = None
 db = None

@@ -1,7 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from core.config import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD
+from app.core.config import SMTP_HOST, SMTP_PORT, SMTP_EMAIL, SMTP_PASSWORD
 
 
 async def send_otp_email(to_email: str, otp_code: str, user_name: str):
