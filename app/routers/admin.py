@@ -5,14 +5,14 @@ import calendar
 from bson import ObjectId
 import secrets
 
-from core.database import get_db
-from core.security import get_current_user
-from core.utils import serialize_doc
-from models.schemas import (
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.core.utils import serialize_doc
+from app.models.schemas import (
     DoctorCreate, DoctorUpdate, DoctorStatusUpdate,
     PatientStatusUpdate, LeaveApproval
 )
-from services.notifications import notify_appointment_status_change
+from app.services.notifications import notify_appointment_status_change
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 

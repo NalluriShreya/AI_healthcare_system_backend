@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, status
 from datetime import datetime
 from bson import ObjectId
 
-from core.database import get_db
-from core.security import hash_password, verify_password, create_access_token
-from core.utils import serialize_doc
-from models.schemas import (
+from app.core.database import get_db
+from app.core.security import hash_password, verify_password, create_access_token
+from app.core.utils import serialize_doc
+from app.models.schemas import (
     PatientSignup, PatientLogin,
     DoctorSignup, DoctorLogin,
     AdminLogin, TokenResponse

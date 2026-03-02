@@ -4,11 +4,11 @@ from typing import Optional
 from bson import ObjectId
 import secrets
 
-from core.database import get_db
-from core.security import get_current_user, verify_password, hash_password
-from core.utils import serialize_doc, is_sunday_date
-from models.schemas import PatientProfileUpdate, AppointmentCreate
-from services.notifications import (
+from app.core.database import get_db
+from app.core.security import get_current_user, verify_password, hash_password
+from app.core.utils import serialize_doc, is_sunday_date
+from app.models.schemas import PatientProfileUpdate, AppointmentCreate
+from app.services.notifications import (
     notify_appointment_status_change,
     notify_doctor_new_appointment,
     notify_doctor_appointment_cancelled

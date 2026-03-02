@@ -5,11 +5,11 @@ import calendar
 import secrets
 from bson import ObjectId
 
-from core.database import get_db
-from core.security import get_current_user
-from core.utils import serialize_doc, is_sunday_date, count_leaves_in_month
-from models.schemas import DoctorAvailability, SlotToggle, LeaveRequest
-from services.notifications import notify_appointment_status_change
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.core.utils import serialize_doc, is_sunday_date, count_leaves_in_month
+from app.models.schemas import DoctorAvailability, SlotToggle, LeaveRequest
+from app.services.notifications import notify_appointment_status_change
 
 router = APIRouter(prefix="/api/doctor", tags=["Doctor"])
 
