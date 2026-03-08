@@ -697,7 +697,7 @@ _derm_classes = None
 _ortho_model  = None
 _ortho_config = None
 
-# ─── FIX 1: Cache for departments endpoint (avoids reloading models on every call) ───
+# Cache for /departments — built once on first call, reused forever
 _departments_cache: Optional[list] = None
 
 
@@ -760,38 +760,18 @@ def _get_derm_model():
     if _derm_model is not None:
         return _derm_model, _derm_classes
 
-    DERM_MODEL_PATH = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="derm_model.pt"
-    )
-
-    DERM_CLASS_NAMES_PATH = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="derm_class_names.json"
-    )
+    DERM_MODEL_PATH = hf_hub_download(repo_id=HF_REPO_ID, filename="derm_model.pt")
+    DERM_CLASS_NAMES_PATH = hf_hub_download(repo_id=HF_REPO_ID, filename="derm_class_names.json")
 
     with open(DERM_CLASS_NAMES_PATH) as f:
         _derm_classes = json.load(f)
 
     device = "cpu"
-
     backbone = AutoModel.from_pretrained(DERM_BACKBONE_NAME)
-
-    model = DermNetDINOv2(
-        backbone,
-        len(_derm_classes),
-        backbone.config.hidden_size
-    )
-
+    model = DermNetDINOv2(backbone, len(_derm_classes), backbone.config.hidden_size)
     state_dict = torch.load(str(DERM_MODEL_PATH), map_location=device)
     model.load_state_dict(state_dict)
-
-    model = torch.quantization.quantize_dynamic(
-        model,
-        {nn.Linear},
-        dtype=torch.qint8
-    )
-
+    model = torch.quantization.quantize_dynamic(model, {nn.Linear}, dtype=torch.qint8)
     model.to(device).eval()
 
     _derm_model = model
@@ -799,7 +779,7 @@ def _get_derm_model():
 
 
 def _unload_derm_model():
-    """FIX 2: Unload DINOv2 after inference to free ~400MB RAM."""
+    """Unload DINOv2 after inference to free ~400MB RAM."""
     global _derm_model, _derm_classes
     _derm_model = None
     _derm_classes = None
@@ -811,32 +791,17 @@ def _get_ortho_model():
     if _ortho_model is not None:
         return _ortho_model, _ortho_config
 
-    ortho_model_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="mura_best.pt"
-    )
-
-    ortho_config_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="config.json"
-    )
+    ortho_model_path = hf_hub_download(repo_id=HF_REPO_ID, filename="mura_best.pt")
+    ortho_config_path = hf_hub_download(repo_id=HF_REPO_ID, filename="config.json")
 
     with open(ortho_config_path) as f:
         _ortho_config = json.load(f)
 
     device = "cpu"
-
     model = MURAModel(num_classes=2, num_parts=7)
-
     state_dict = torch.load(ortho_model_path, map_location=device)
     model.load_state_dict(state_dict)
-
-    model = torch.quantization.quantize_dynamic(
-        model,
-        {nn.Linear},
-        dtype=torch.qint8
-    )
-
+    model = torch.quantization.quantize_dynamic(model, {nn.Linear}, dtype=torch.qint8)
     model.to(device).eval()
 
     for m in model.modules():
@@ -848,7 +813,7 @@ def _get_ortho_model():
 
 
 def _unload_ortho_model():
-    """FIX 2: Unload EfficientNetV2 after inference to free ~300MB RAM."""
+    """Unload EfficientNetV2 after inference to free ~300MB RAM."""
     global _ortho_model, _ortho_config
     _ortho_model = None
     _ortho_config = None
@@ -885,7 +850,6 @@ def _preprocess_ortho_image(image_bytes: bytes) -> torch.Tensor:
 # ─── Standard PKL model helpers ───────────────────────────────────────────────
 def _load_model(department: str) -> dict:
     dept = department.lower()
-
     if dept not in _loaded_models:
         model_path = hf_hub_download(
             repo_id=HF_REPO_ID,
@@ -893,7 +857,6 @@ def _load_model(department: str) -> dict:
         )
         with open(model_path, "rb") as f:
             _loaded_models[dept] = pickle.load(f)
-
     return _loaded_models[dept]
 
 
@@ -968,12 +931,13 @@ class PredictionRequest(BaseModel):
 @router.get("/departments")
 async def list_departments(current_user: dict = Depends(get_current_user)):
     """
-    FIX 3: Departments endpoint completely rewritten.
-    - No longer loads ALL pkl models just to show the list (was the #1 memory killer)
-    - Uses in-memory cache so HuggingFace is not called on every request
-    - pkl models are only loaded on actual prediction requests
-    - feature_names/metrics are populated from cache if model was already loaded,
-      otherwise omitted (frontend should request them on demand)
+    Loads all 9 pkl models (small scikit-learn pipelines, ~10MB each = ~100MB total)
+    and caches the result. Runs ONCE per server lifetime — every subsequent call
+    returns instantly from cache with zero HuggingFace downloads or model loading.
+
+    The heavy PyTorch image models (DINOv2 ~400MB, EfficientNetV2 ~300MB) are
+    NOT loaded here — only on actual image prediction requests, and unloaded
+    immediately after to stay within Render's 512MB free tier limit.
     """
     global _departments_cache
     if _departments_cache is not None:
@@ -981,28 +945,25 @@ async def list_departments(current_user: dict = Depends(get_current_user)):
 
     available = []
 
-    # Build department list from static metadata — NO model loading here
+    # Load all 9 pkl models — safe, they are small scikit-learn pipelines
     for dept, meta in DEPT_META.items():
-        dept_entry = {
-            "id":          dept,
-            "label":       meta["label"],
-            "condition":   meta["condition"],
-            "description": meta["description"],
-            # Populate from cache if this model was already loaded by a prediction
-            "is_multiclass": _loaded_models[dept]["metrics"].get("is_multiclass", False)
-                             if dept in _loaded_models else False,
-            "class_names":   _loaded_models[dept].get("class_names", [])
-                             if dept in _loaded_models else [],
-            "feature_names": _loaded_models[dept]["feature_names"]
-                             if dept in _loaded_models else [],
-            "feature_info":  _loaded_models[dept]["feature_info"]
-                             if dept in _loaded_models else {},
-            "metrics":       _safe_metrics(_loaded_models[dept]["metrics"])
-                             if dept in _loaded_models else {},
-        }
-        available.append(dept_entry)
+        try:
+            model_data = _load_model(dept)
+            available.append({
+                "id":            dept,
+                "label":         meta["label"],
+                "condition":     meta["condition"],
+                "description":   meta["description"],
+                "is_multiclass": model_data["metrics"].get("is_multiclass", False),
+                "class_names":   model_data.get("class_names", []),
+                "feature_names": model_data["feature_names"],
+                "feature_info":  model_data["feature_info"],
+                "metrics":       _safe_metrics(model_data["metrics"]),
+            })
+        except Exception:
+            pass
 
-    # Dermatology card — only download the small JSON, not the model
+    # Dermatology card — downloads only the small JSON, NOT the DINOv2 model
     try:
         class_path = hf_hub_download(repo_id=HF_REPO_ID, filename="derm_class_names.json")
         with open(class_path) as f:
@@ -1026,7 +987,7 @@ async def list_departments(current_user: dict = Depends(get_current_user)):
     except Exception:
         pass
 
-    # Orthopedics card — only download the small config JSON, not the model
+    # Orthopedics card — downloads only the small config JSON, NOT the EfficientNetV2 model
     try:
         config_path = hf_hub_download(repo_id=HF_REPO_ID, filename="config.json")
         with open(config_path) as f:
@@ -1051,43 +1012,9 @@ async def list_departments(current_user: dict = Depends(get_current_user)):
     except Exception:
         pass
 
+    # Store in cache — this block never runs again until server restarts
     _departments_cache = available
     return {"departments": available}
-
-
-@router.get("/departments/{department}")
-async def get_department_detail(
-    department: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    FIX 4: New endpoint — loads a single department's model details on demand.
-    Frontend should call this only when the user actually selects a department,
-    not on the departments listing page. This spreads memory load over time
-    instead of spiking all at once.
-    """
-    dept = department.lower()
-
-    if dept not in DEPT_META:
-        raise HTTPException(status_code=404, detail=f"Unknown department: '{dept}'")
-
-    model_data = _load_model(dept)
-
-    # Invalidate departments cache so next call reflects loaded model metadata
-    global _departments_cache
-    _departments_cache = None
-
-    return {
-        "id":            dept,
-        "label":         DEPT_META[dept]["label"],
-        "condition":     DEPT_META[dept]["condition"],
-        "description":   DEPT_META[dept]["description"],
-        "is_multiclass": model_data["metrics"].get("is_multiclass", False),
-        "class_names":   model_data.get("class_names", []),
-        "feature_names": model_data["feature_names"],
-        "feature_info":  model_data["feature_info"],
-        "metrics":       _safe_metrics(model_data["metrics"]),
-    }
 
 
 @router.post("/")
@@ -1253,7 +1180,7 @@ async def predict_dermatology(
             ),
         }
     finally:
-        # FIX 2: Always unload the large model after inference, even on error
+        # Always unload DINOv2 after inference to free ~400MB RAM
         _unload_derm_model()
 
     return result
@@ -1319,7 +1246,7 @@ async def predict_orthopedics(
             ),
         }
     finally:
-        # FIX 2: Always unload the large model after inference, even on error
+        # Always unload EfficientNetV2 after inference to free ~300MB RAM
         _unload_ortho_model()
 
     return result
