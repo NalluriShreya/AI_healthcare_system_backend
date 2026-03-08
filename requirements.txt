@@ -19,3 +19,4 @@ albumentations==2.0.8
 Pillow==11.3.0
 email-validator==2.3.0
 python-multipart==0.0.20
+huggingface_hub==0.36.2

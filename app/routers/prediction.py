@@ -1,12 +1,7 @@
 """
 Disease Prediction API Router
 File: routers/prediction.py
-
-Include in main.py:
-    from routers.prediction import router as prediction_router
-    app.include_router(prediction_router)
 """
-
 import os
 import io
 import json
@@ -23,38 +18,19 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Any, Dict
 from pathlib import Path
+from huggingface_hub import hf_hub_download
 
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/predict", tags=["Disease Prediction"])
 
-# ─── Base directory (backend/) ─────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-
-# ─── Model directory inside project ───────────────────────────────────────
-MODELS_DIR = BASE_DIR / "model_training_new" / "models"
-
-# ─── Dermatology Paths ────────────────────────────────────────────────────
-DERM_MODEL_PATH       = MODELS_DIR / "dermnet_dinov2" / "derm_model.pt"
-DERM_CLASS_NAMES_PATH = MODELS_DIR / "dermnet_dinov2" / "derm_class_names.json"
-
-# ─── Orthopedics Paths ────────────────────────────────────────────────────
-ORTHO_MODEL_PATH  = MODELS_DIR / "mura_efficientnetv2" / "mura_best.pt"
-ORTHO_CONFIG_PATH = MODELS_DIR / "mura_efficientnetv2" / "config.json"
-
-
-# ─── Model directories ────────────────────────────────────────────────────────
-MODELS_DIR = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models"
+HF_REPO_ID = "NalluriShreya/ai-healthcare-models"
 
 # ─── DermNet DINOv2 config ────────────────────────────────────────────────────
-# DERM_MODEL_PATH       = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_model.pt"
-# DERM_CLASS_NAMES_PATH = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\dermnet_dinov2\derm_class_names.json"
 DERM_IMG_SIZE         = 224
 DERM_BACKBONE_NAME    = "Jayanth2002/dinov2-base-finetuned-SkinDisease"
 
 # ─── MURA Orthopedics config ──────────────────────────────────────────────────
-# ORTHO_MODEL_PATH      = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\mura_best.pt"
-# ORTHO_CONFIG_PATH     = r"D:\Data_Science\Projects\AI_Healthcare_System\model_training_new\models\mura_efficientnetv2\config.json"
 ORTHO_IMG_SIZE        = 320
 ORTHO_BODY_PARTS      = ['XR_ELBOW', 'XR_FINGER', 'XR_FOREARM',
                           'XR_HAND', 'XR_HUMERUS', 'XR_SHOULDER', 'XR_WRIST']
@@ -119,59 +95,119 @@ class MURAModel(nn.Module):
 
 
 # ─── Lazy loaders ─────────────────────────────────────────────────────────────
+
 def _get_derm_model():
     global _derm_model, _derm_classes
     if _derm_model is not None:
         return _derm_model, _derm_classes
 
-    if not os.path.exists(DERM_MODEL_PATH):
-        raise HTTPException(status_code=404,
-            detail="Dermatology model not found. Place best_model.pt in models/dermnet_dinov2/.")
-    if not os.path.exists(DERM_CLASS_NAMES_PATH):
-        raise HTTPException(status_code=404,
-            detail="class_names.json not found in models/dermnet_dinov2/.")
+    DERM_MODEL_PATH = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename="derm_model.pt"
+    )
+
+    DERM_CLASS_NAMES_PATH = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename="derm_class_names.json"
+    )
 
     with open(DERM_CLASS_NAMES_PATH) as f:
         _derm_classes = json.load(f)
 
-    device   = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
+
     backbone = AutoModel.from_pretrained(DERM_BACKBONE_NAME)
-    model    = DermNetDINOv2(backbone, len(_derm_classes), backbone.config.hidden_size)
-    model.load_state_dict(torch.load(DERM_MODEL_PATH, map_location=device))
+
+    model = DermNetDINOv2(
+        backbone,
+        len(_derm_classes),
+        backbone.config.hidden_size
+    )
+
+    state_dict = torch.load(str(DERM_MODEL_PATH), map_location=device)
+    model.load_state_dict(state_dict)
+
+    # 🔹 RAM optimization
+    model = torch.quantization.quantize_dynamic(
+        model,
+        {nn.Linear},
+        dtype=torch.qint8
+    )
+
     model.to(device).eval()
+
     _derm_model = model
     return _derm_model, _derm_classes
 
+# def _get_ortho_model():
+#     global _ortho_model, _ortho_config
+#     if _ortho_model is not None:
+#         return _ortho_model, _ortho_config
+
+#     if not os.path.exists(ORTHO_MODEL_PATH):
+#         raise HTTPException(status_code=404,
+#             detail="Orthopedics model not found. Place mura_best.pt in models/mura_efficientnetv2/.")
+
+#     # Load config (optional — for kappa/accuracy metrics)
+#     if os.path.exists(ORTHO_CONFIG_PATH):
+#         with open(ORTHO_CONFIG_PATH) as f:
+#             _ortho_config = json.load(f)
+#     else:
+#         _ortho_config = {"best_kappa": 0.6507, "acc_tta": 0.8265}
+
+#     # device = "cuda" if torch.cuda.is_available() else "cpu"
+#     device = "cpu"
+#     model  = MURAModel(num_classes=2, num_parts=7)
+#     model.load_state_dict(torch.load(ORTHO_MODEL_PATH, map_location=device))
+#     model.to(device).eval()
+
+#     # Enable Dropout for TTA stochasticity while keeping BatchNorm in eval mode
+#     for m in model.modules():
+#         if isinstance(m, nn.Dropout):
+#             m.train()
+
+#     _ortho_model = model
+#     return _ortho_model, _ortho_config
 
 def _get_ortho_model():
     global _ortho_model, _ortho_config
     if _ortho_model is not None:
         return _ortho_model, _ortho_config
 
-    if not os.path.exists(ORTHO_MODEL_PATH):
-        raise HTTPException(status_code=404,
-            detail="Orthopedics model not found. Place mura_best.pt in models/mura_efficientnetv2/.")
+    ortho_model_path = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename="mura_best.pt"
+    )
 
-    # Load config (optional — for kappa/accuracy metrics)
-    if os.path.exists(ORTHO_CONFIG_PATH):
-        with open(ORTHO_CONFIG_PATH) as f:
-            _ortho_config = json.load(f)
-    else:
-        _ortho_config = {"best_kappa": 0.6507, "acc_tta": 0.8265}
+    ortho_config_path = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename="config.json"
+    )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model  = MURAModel(num_classes=2, num_parts=7)
-    model.load_state_dict(torch.load(ORTHO_MODEL_PATH, map_location=device))
+    with open(ortho_config_path) as f:
+        _ortho_config = json.load(f)
+
+    device = "cpu"
+
+    model = MURAModel(num_classes=2, num_parts=7)
+
+    state_dict = torch.load(ortho_model_path, map_location=device)
+    model.load_state_dict(state_dict)
+
+    model = torch.quantization.quantize_dynamic(
+        model,
+        {nn.Linear},
+        dtype=torch.qint8
+    )
+
     model.to(device).eval()
 
-    # Enable Dropout for TTA stochasticity while keeping BatchNorm in eval mode
     for m in model.modules():
         if isinstance(m, nn.Dropout):
             m.train()
 
     _ortho_model = model
     return _ortho_model, _ortho_config
-
 
 # ─── Image preprocessors ──────────────────────────────────────────────────────
 def _preprocess_derm_image(image_bytes: bytes) -> torch.Tensor:
@@ -204,13 +240,17 @@ def _preprocess_ortho_image(image_bytes: bytes) -> torch.Tensor:
 # ─── Standard PKL model helpers ───────────────────────────────────────────────
 def _load_model(department: str) -> dict:
     dept = department.lower()
+
     if dept not in _loaded_models:
-        path = os.path.join(MODELS_DIR, f"{dept}_model.pkl")
-        if not os.path.exists(path):
-            raise HTTPException(status_code=404,
-                detail=f"Model for '{dept}' not found. Run train_models.py first.")
-        with open(path, "rb") as f:
+
+        model_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=f"{dept}_model.pkl"
+        )
+
+        with open(model_path, "rb") as f:
             _loaded_models[dept] = pickle.load(f)
+
     return _loaded_models[dept]
 
 
@@ -287,9 +327,6 @@ async def list_departments(current_user: dict = Depends(get_current_user)):
     available = []
 
     for dept, meta in DEPT_META.items():
-        path = os.path.join(MODELS_DIR, f"{dept}_model.pkl")
-        if not os.path.exists(path):
-            continue
         try:
             model_data = _load_model(dept)
             available.append({
@@ -307,47 +344,61 @@ async def list_departments(current_user: dict = Depends(get_current_user)):
             pass
 
     # Dermatology card
-    if os.path.exists(DERM_MODEL_PATH) and os.path.exists(DERM_CLASS_NAMES_PATH):
-        with open(DERM_CLASS_NAMES_PATH) as f:
+    try:
+        class_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename="derm_class_names.json"
+        )
+
+        with open(class_path) as f:
             derm_classes = json.load(f)
+
         available.append({
-            "id":            "dermatology",
-            "label":         "Dermatology",
-            "condition":     "Skin Disease",
-            "description":   f"AI-powered skin disease classifier across {len(derm_classes)} conditions. Upload a photo of the affected area.",
+            "id": "dermatology",
+            "label": "Dermatology",
+            "condition": "Skin Disease",
+            "description": f"AI-powered skin disease classifier across {len(derm_classes)} conditions. Upload a photo of the affected area.",
             "is_multiclass": True,
-            "is_image":      True,
-            "class_names":   derm_classes,
+            "is_image": True,
+            "class_names": derm_classes,
             "feature_names": [],
-            "feature_info":  {},
+            "feature_info": {},
             "metrics": {
-                "accuracy":   69.2,
+                "accuracy": 69.2,
                 "best_model": "DINOv2-Base",
             },
         })
+    except:
+        pass
 
     # Orthopedics (MURA) card
-    if os.path.exists(ORTHO_MODEL_PATH):
-        ortho_cfg = {}
-        if os.path.exists(ORTHO_CONFIG_PATH):
-            with open(ORTHO_CONFIG_PATH) as f:
-                ortho_cfg = json.load(f)
+    try:
+        config_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename="config.json"
+        )
+
+        with open(config_path) as f:
+            ortho_cfg = json.load(f)
+
         available.append({
-            "id":            "orthopedics",
-            "label":         "Orthopedics",
-            "condition":     "Musculoskeletal Abnormality",
-            "description":   "Detects abnormalities in musculoskeletal X-rays across 7 body parts (elbow, finger, forearm, hand, humerus, shoulder, wrist).",
+            "id": "orthopedics",
+            "label": "Orthopedics",
+            "condition": "Musculoskeletal Abnormality",
+            "description": "Detects abnormalities in musculoskeletal X-rays across 7 body parts.",
             "is_multiclass": False,
-            "is_image":      True,
-            "class_names":   ["Normal", "Abnormal"],
+            "is_image": True,
+            "class_names": ["Normal", "Abnormal"],
             "feature_names": [],
-            "feature_info":  {},
+            "feature_info": {},
             "metrics": {
-                "accuracy":   round(ortho_cfg.get("acc_tta",   0.8265) * 100, 1),
-                "kappa":      round(ortho_cfg.get("kappa_tta", 0.6507), 4),
+                "accuracy": round(ortho_cfg.get("acc_tta", 0.8265) * 100, 1),
+                "kappa": round(ortho_cfg.get("kappa_tta", 0.6507), 4),
                 "best_model": "EfficientNetV2-M",
             },
         })
+    except:
+        pass
 
     return {"departments": available}
 
